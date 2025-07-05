@@ -5,7 +5,7 @@ const path = require('path')
 const { fetch, request } = require('undici')
 const { fileURLToPath } = require('url')
 const { createHash } = require('crypto')
-const { pipeline } = require('stream/promises')
+const { pipeline } = require('stream')
 
 const { parse } = require('@fast-csv/parse')
 const { Address4, Address6 } = require('ip-address')
@@ -120,66 +120,67 @@ const dbipLocation = async () => {
 	const res = await fetch(address)
 	const tmpFile = path.join(setting.tmpDataDir, 'dbip-city-lite.csv')
 	const ws = fsSync.createWriteStream(tmpFile)
-	await pipeline(res.body.pipeThrough(new DecompressionStream('gzip')), ws)
-	return new Promise((resolve, reject) => {
-		const v4 = [], v6 = []
-		var preData
-		fsSync.createReadStream(tmpFile).pipe(parse())
-			.on('error', reject)
-			.on('end', () => {
-				var v4Buf1 = Buffer.alloc(v4.length * 4)
-				var v4Buf2 = Buffer.alloc(v4.length * 4)
-				var v4Buf3 = Buffer.alloc(v4.length * 8)
-				for(var i = 0; i < v4.length; ++i){
-					v4Buf1.writeUInt32LE(v4[i][0], i * 4)
-					v4Buf2.writeUInt32LE(v4[i][1], i * 4)
-					v4Buf3.writeInt32LE(v4[i][2], i * 8)
-					v4Buf3.writeInt32LE(v4[i][3], i * 8 + 4)
-				}
-				fsSync.writeFileSync(path.join(setting.fieldDir, '4-1.dat'), v4Buf1)
-				fsSync.writeFileSync(path.join(setting.fieldDir, '4-2.dat'), v4Buf2)
-				fsSync.writeFileSync(path.join(setting.fieldDir, '4-3.dat'), v4Buf3)
-		
-				var v6Buf1 = Buffer.alloc(v6.length * 8)
-				var v6Buf2 = Buffer.alloc(v6.length * 8)
-				var v6Buf3 = Buffer.alloc(v6.length * 8)
-				for(var i = 0; i < v6.length; ++i){
-					v6Buf1.writeBigUInt64LE(v6[i][0], i * 8)
-					v6Buf2.writeBigUInt64LE(v6[i][1], i * 8)
-					v6Buf3.writeInt32LE(v6[i][2], i * 8)
-					v6Buf3.writeInt32LE(v6[i][3], i * 8 + 4)
-				}
-				fsSync.writeFileSync(path.join(setting.fieldDir, '6-1.dat'), v6Buf1)
-				fsSync.writeFileSync(path.join(setting.fieldDir, '6-2.dat'), v6Buf2)
-				fsSync.writeFileSync(path.join(setting.fieldDir, '6-3.dat'), v6Buf3)
-				resolve()
-			})
-			.on('data', arr => {
-				if(!arr[2] || arr[3] === 'ZZ' || arr[3] === 'EU') return;
-				var latitude = Math.round((parseFloat(arr[6])) * 10000) // -90 ~ 90 -> 10 ~ 190
-
-				var longitude = Math.round((parseFloat(arr[7])) * 10000)// -180 ~ 180 -> 20 ~ 220
-
-				var countryCodeNum = countryCodeToNum(arr[3]) // 0 ~ 675
-				latitude = (latitude) << 10 | countryCodeNum
-				if(arr[0].includes(':')){
-					var start = aton6(arr[0])
-					if(preData[1].constructor !== BigInt) preData = null
-					if(preData && preData[1] + 1n === start && preData[2] === latitude && preData[3] === longitude){
-						preData[1] = aton6(arr[1])
-						return
+	return pipeline(res.body.pipeThrough(new DecompressionStream('gzip')), ws).then(() => {
+		new Promise((resolve, reject) => {
+			const v4 = [], v6 = []
+			var preData
+			fsSync.createReadStream(tmpFile).pipe(parse())
+				.on('error', reject)
+				.on('end', () => {
+					var v4Buf1 = Buffer.alloc(v4.length * 4)
+					var v4Buf2 = Buffer.alloc(v4.length * 4)
+					var v4Buf3 = Buffer.alloc(v4.length * 8)
+					for(var i = 0; i < v4.length; ++i){
+						v4Buf1.writeUInt32LE(v4[i][0], i * 4)
+						v4Buf2.writeUInt32LE(v4[i][1], i * 4)
+						v4Buf3.writeInt32LE(v4[i][2], i * 8)
+						v4Buf3.writeInt32LE(v4[i][3], i * 8 + 4)
 					}
-					v6.push(preData = [aton6(arr[0]), aton6(arr[1]), latitude, longitude])
-				} else {
-					var start = aton4(arr[0])
-					if(preData && preData[1] + 1 === start && preData[2] === latitude && preData[3] === longitude){
-						preData[1] = aton4(arr[1])
-						return
+					fsSync.writeFileSync(path.join(setting.fieldDir, '4-1.dat'), v4Buf1)
+					fsSync.writeFileSync(path.join(setting.fieldDir, '4-2.dat'), v4Buf2)
+					fsSync.writeFileSync(path.join(setting.fieldDir, '4-3.dat'), v4Buf3)
+			
+					var v6Buf1 = Buffer.alloc(v6.length * 8)
+					var v6Buf2 = Buffer.alloc(v6.length * 8)
+					var v6Buf3 = Buffer.alloc(v6.length * 8)
+					for(var i = 0; i < v6.length; ++i){
+						v6Buf1.writeBigUInt64LE(v6[i][0], i * 8)
+						v6Buf2.writeBigUInt64LE(v6[i][1], i * 8)
+						v6Buf3.writeInt32LE(v6[i][2], i * 8)
+						v6Buf3.writeInt32LE(v6[i][3], i * 8 + 4)
 					}
-					v4.push(preData = [aton4(arr[0]), aton4(arr[1]), latitude, longitude])
-				}
-			})
-	})
+					fsSync.writeFileSync(path.join(setting.fieldDir, '6-1.dat'), v6Buf1)
+					fsSync.writeFileSync(path.join(setting.fieldDir, '6-2.dat'), v6Buf2)
+					fsSync.writeFileSync(path.join(setting.fieldDir, '6-3.dat'), v6Buf3)
+					resolve()
+				})
+				.on('data', arr => {
+					if(!arr[2] || arr[3] === 'ZZ' || arr[3] === 'EU') return;
+					var latitude = Math.round((parseFloat(arr[6])) * 10000) // -90 ~ 90 -> 10 ~ 190
+
+					var longitude = Math.round((parseFloat(arr[7])) * 10000)// -180 ~ 180 -> 20 ~ 220
+
+					var countryCodeNum = countryCodeToNum(arr[3]) // 0 ~ 675
+					latitude = (latitude) << 10 | countryCodeNum
+					if(arr[0].includes(':')){
+						var start = aton6(arr[0])
+						if(preData[1].constructor !== BigInt) preData = null
+						if(preData && preData[1] + 1n === start && preData[2] === latitude && preData[3] === longitude){
+							preData[1] = aton6(arr[1])
+							return
+						}
+						v6.push(preData = [aton6(arr[0]), aton6(arr[1]), latitude, longitude])
+					} else {
+						var start = aton4(arr[0])
+						if(preData && preData[1] + 1 === start && preData[2] === latitude && preData[3] === longitude){
+							preData[1] = aton4(arr[1])
+							return
+						}
+						v4.push(preData = [aton4(arr[0]), aton4(arr[1]), latitude, longitude])
+					}
+				})
+		})
+	});
 }
 
 const createBrowserIndex = async (type) => {
